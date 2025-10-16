@@ -1,0 +1,24 @@
+# Secrets
+.env
+
+# Data volumes
+data/
+ollama_data/
+openwebui_data/
+comfyui_data/
+
+# Python caches
+**/__pycache__/
+**/*.pyc
+
+# Node/Yarn caches (if any future tooling)
+node_modules/
+
+# Editor/OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log
+
+

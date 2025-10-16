@@ -1,0 +1,155 @@
+services:
+  # Ollama - Local LLM inference engine
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ai-ollama
+    restart: unless-stopped
+    profiles: ["gpu"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./data/models:/models
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+      - OLLAMA_ORIGINS=*
+    networks:
+      - homelab-web
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Open WebUI - Web interface for Ollama
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: ai-openwebui
+    restart: unless-stopped
+    ports:
+      - "8189:8080"
+    volumes:
+      - openwebui_data:/app/backend/data
+      - ./data/cache:/app/backend/cache
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
+      - WEBUI_AUTH=${WEBUI_AUTH:-True}
+      - WEBUI_NAME=${WEBUI_NAME:-Hephaestus AI}
+      - DEFAULT_USER_ROLE=${DEFAULT_USER_ROLE:-user}
+      - ENABLE_SIGNUP=${ENABLE_SIGNUP:-False}
+      - OPENAI_API_BASE_URL=${OPENROUTER_API_URL:-https://openrouter.ai/api/v1}
+      - OPENAI_API_KEY=${OPENROUTER_API_KEY}
+    networks:
+      - homelab-web
+    # No hard dependency; can run cloud-only via OpenRouter
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # ComfyUI - Advanced image generation workflows
+  comfyui:
+    build: ./comfyui
+    container_name: ai-comfyui
+    restart: unless-stopped
+    profiles: ["gpu"]
+    ports:
+      - "8188:8188"
+    volumes:
+      - comfyui_data:/opt/ComfyUI/user
+      - ./data/models:/opt/ComfyUI/models
+      - ./data/outputs:/opt/ComfyUI/output
+      - ./comfyui/workflows:/opt/ComfyUI/user/default/workflows
+      - ./comfyui/custom_nodes:/opt/ComfyUI/custom_nodes
+    environment:
+      - CLI_ARGS=--listen 0.0.0.0 --port 8188
+    networks:
+      - homelab-web
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 120s
+
+  # OpenRouter Proxy - Cloud model access
+  openrouter-proxy:
+    build: ./openrouter-proxy
+    container_name: ai-openrouter-proxy
+    restart: unless-stopped
+    ports:
+      - "8190:8190"
+    environment:
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - PROXY_PORT=8190
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - RATE_LIMIT=${RATE_LIMIT:-100}
+    networks:
+      - homelab-web
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8190/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Model Manager - Download and manage AI models
+  model-manager:
+    build: ./model-manager
+    container_name: ai-model-manager
+    restart: unless-stopped
+    profiles: ["gpu"]
+    ports:
+      - "8191:8191"
+    volumes:
+      - ./data/models:/app/models
+      - ollama_data:/app/ollama_data
+      - comfyui_data:/app/comfyui_data
+      - ./model-manager/config:/app/config
+    environment:
+      - MANAGER_PORT=8191
+      - OLLAMA_URL=http://ollama:11434
+      - COMFYUI_URL=http://comfyui:8188
+      - MODEL_STORAGE_PATH=/app/models
+    networks:
+      - homelab-web
+    depends_on:
+      - ollama
+      - comfyui
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8191/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  ollama_data:
+    driver: local
+  openwebui_data:
+    driver: local
+  comfyui_data:
+    driver: local
+
+networks:
+  homelab-web:
+    external: true
+    name: homelab-web
