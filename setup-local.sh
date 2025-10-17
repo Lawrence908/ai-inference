@@ -3,22 +3,19 @@ set -Eeuo pipefail
 
 # Usage:
 # Full setup (recommended for first time)
-./setup.sh --full-setup
-# Or individual steps
-./setup.sh --setup-env          # Create .env file from template
-./setup.sh --check-gpu          # Check GPU availability
-./setup.sh --download-models    # Download initial models
-./setup.sh --start-services     # Start AI services
-./setup.sh --full-setup         # Complete setup (all steps)
-./setup.sh --help               # Show this help
+./setup-local.sh --full-setup
 
+# Or individual steps
+./setup-local.sh --check-gpu          # Test GPU + Docker
+./setup-local.sh --download-models    # Download AI models
+./setup-local.sh --start-services     # Start all services with GPU
 
 # AI Inference Services Setup Script
-# Configures and starts the AI inference services for Hephaestus homelab
+# Configures and starts the AI inference services for local WSL2 development
 
-ROOT_DIR="/home/chris"
-APPS_DIR="$ROOT_DIR/apps"
-AI_DIR="$APPS_DIR/ai-inference"
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AI_DIR="$SCRIPT_DIR"
 
 # Colors for output
 RED='\033[0;31m'
@@ -83,10 +80,15 @@ check_docker() {
         exit 1
     fi
     
-    # Check for NVIDIA Container Toolkit
-    if ! docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi &> /dev/null; then
-        log "WARNING" "NVIDIA Container Toolkit not properly configured."
-        log "INFO" "Please install NVIDIA Container Toolkit for GPU support."
+    # Check for NVIDIA Container Toolkit with WSL2-specific test
+    log "INFO" "Testing GPU access in Docker..."
+    if ! docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi &> /dev/null; then
+        log "WARNING" "NVIDIA Container Toolkit not properly configured for WSL2."
+        log "INFO" "Please run the NVIDIA Container Toolkit setup commands:"
+        log "INFO" "  sudo nvidia-ctk runtime configure --runtime=docker"
+        log "INFO" "  sudo nvidia-ctk cdi generate --output=/etc/cdi"
+        log "INFO" "  sudo systemctl restart docker"
+        return 1
     else
         log "SUCCESS" "Docker with GPU support is working."
     fi
@@ -111,14 +113,10 @@ setup_env() {
 }
 
 check_network() {
-    log "INFO" "Checking homelab network..."
+    log "INFO" "Checking Docker network configuration..."
     
-    if ! docker network inspect homelab-web &> /dev/null; then
-        log "WARNING" "homelab-web network not found. Creating it..."
-        "$ROOT_DIR/setup-networks.sh" --network-name homelab-web --subnet 172.20.0.0/16
-    else
-        log "SUCCESS" "homelab-web network exists"
-    fi
+    # For local development, we use the default Docker network
+    log "SUCCESS" "Using default Docker network for local development"
 }
 
 download_models() {
@@ -126,7 +124,7 @@ download_models() {
     
     # Start Ollama first
     log "INFO" "Starting Ollama service..."
-    docker compose -f "$AI_DIR/docker-compose-homelab.yml" up -d ollama
+    docker compose -f "$AI_DIR/docker-compose.yml" --profile gpu up -d ollama
     
     # Wait for Ollama to be ready
     log "INFO" "Waiting for Ollama to be ready..."
@@ -165,14 +163,9 @@ download_models() {
 start_services() {
     log "INFO" "Starting AI inference services..."
     
-    # Use homelab management script
-    if [[ -f "$ROOT_DIR/manage-services.sh" ]]; then
-        log "INFO" "Using homelab management script..."
-        "$ROOT_DIR/manage-services.sh" up --service ai-inference
-    else
-        log "INFO" "Using direct docker compose..."
-        docker compose -f "$AI_DIR/docker-compose-homelab.yml" up -d
-    fi
+    # Use local docker compose with GPU profile
+    log "INFO" "Starting services with GPU support..."
+    docker compose -f "$AI_DIR/docker-compose.yml" --profile gpu up -d
     
     log "SUCCESS" "AI services started"
 }
@@ -196,36 +189,32 @@ check_services() {
         log "SUCCESS" "All AI services are running"
     else
         log "WARNING" "Some services may not be running. Check logs:"
-        log "INFO" "  ~/manage-services.sh logs --service ai-inference"
+        log "INFO" "  docker compose logs -f"
     fi
 }
 
 show_access_info() {
     log "INFO" "AI Services Access Information:"
     echo ""
-    log "INFO" "Direct Access (LAN):"
-    log "INFO" "  Open WebUI:     http://192.168.50.70:8189"
-    log "INFO" "  ComfyUI:        http://192.168.50.70:8188"
-    log "INFO" "  Model Manager:  http://192.168.50.70:8191"
-    log "INFO" "  OpenRouter:     http://192.168.50.70:8190"
-    echo ""
-    log "INFO" "Proxy Access (for Organizr embedding):"
-    log "INFO" "  Open WebUI:     http://192.168.50.70:8161"
-    log "INFO" "  ComfyUI:        http://192.168.50.70:8162"
-    log "INFO" "  Model Manager:  http://192.168.50.70:8164"
-    log "INFO" "  OpenRouter:     http://192.168.50.70:8163"
-    echo ""
-    log "INFO" "Public Access (via Cloudflare Tunnel):"
-    log "INFO" "  Open WebUI:     https://chrislawrence.ca/ai"
-    log "INFO" "  ComfyUI:        https://chrislawrence.ca/comfyui"
-    log "INFO" "  Model Manager:  https://chrislawrence.ca/models"
-    log "INFO" "  OpenRouter:     https://chrislawrence.ca/openrouter"
+    log "INFO" "Local Development Access:"
+    log "INFO" "  Open WebUI:     http://localhost:8189"
+    log "INFO" "  ComfyUI:        http://localhost:8188"
+    log "INFO" "  Model Manager:  http://localhost:8191"
+    log "INFO" "  OpenRouter:     http://localhost:8190"
+    log "INFO" "  Ollama API:     http://localhost:11434"
     echo ""
     log "INFO" "Management Commands:"
-    log "INFO" "  Start:          ~/manage-services.sh up --service ai-inference"
-    log "INFO" "  Stop:           ~/manage-services.sh down --service ai-inference"
-    log "INFO" "  Status:         ~/manage-services.sh ps --service ai-inference"
-    log "INFO" "  Logs:           ~/manage-services.sh logs --service ai-inference"
+    log "INFO" "  Start:          docker compose --profile gpu up -d"
+    log "INFO" "  Stop:           docker compose down"
+    log "INFO" "  Rebuild:        docker compose --profile gpu up -d --build"
+    log "INFO" "  Status:         docker compose ps"
+    log "INFO" "  Logs:           docker compose logs -f"
+    echo ""
+    log "INFO" "Useful Aliases (source ./docker-aliases.sh):"
+    log "INFO" "  dcupgpu         - Start with GPU"
+    log "INFO" "  dcreupgpu      - Rebuild and start with GPU"
+    log "INFO" "  dclogs         - View logs"
+    log "INFO" "  dgpu           - Test GPU in Docker"
 }
 
 main() {

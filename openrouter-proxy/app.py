@@ -22,6 +22,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
 import uvicorn
+from contextlib import asynccontextmanager
 
 # Configure structured logging
 structlog.configure(
@@ -60,10 +61,32 @@ TOKEN_USAGE = Counter('openrouter_tokens_total', 'Total tokens used', ['model', 
 limiter = Limiter(key_func=get_remote_address)
 
 # FastAPI app
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    logger.info("Starting OpenRouter Proxy service", port=PROXY_PORT)
+
+    if not OPENROUTER_API_KEY:
+        logger.error("OPENROUTER_API_KEY not configured")
+        raise RuntimeError("OPENROUTER_API_KEY is required")
+
+    # Initialize shared HTTP client
+    await get_http_client()
+    logger.info("OpenRouter Proxy service started successfully")
+
+    yield
+
+    # Shutdown
+    global http_client
+    if http_client:
+        await http_client.aclose()
+    logger.info("OpenRouter Proxy service stopped")
+
 app = FastAPI(
     title="OpenRouter Proxy",
-    description="Proxy service for OpenRouter API with rate limiting and monitoring",
-    version="1.0.0"
+    description="Proxy service for OpenRouter API with rate limiting, caching, and monitoring",
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 app.state.limiter = limiter
@@ -130,26 +153,7 @@ async def verify_api_key(credentials: HTTPAuthorizationCredentials = Depends(sec
     # In production, implement proper API key verification
     return credentials.credentials
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup"""
-    logger.info("Starting OpenRouter Proxy service", port=PROXY_PORT)
-    
-    if not OPENROUTER_API_KEY:
-        logger.error("OPENROUTER_API_KEY not configured")
-        raise RuntimeError("OPENROUTER_API_KEY is required")
-    
-    # Initialize HTTP client
-    await get_http_client()
-    logger.info("OpenRouter Proxy service started successfully")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    global http_client
-    if http_client:
-        await http_client.aclose()
-    logger.info("OpenRouter Proxy service stopped")
+ 
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():

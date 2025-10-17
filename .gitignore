@@ -21,4 +21,6 @@ Thumbs.db
 .vscode/
 *.log
 
-
+# Python virtual environment
+venv/
+.venv/
