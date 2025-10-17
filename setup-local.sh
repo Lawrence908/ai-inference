@@ -3,12 +3,12 @@ set -Eeuo pipefail
 
 # Usage:
 # Full setup (recommended for first time)
-./setup-local.sh --full-setup
+# ./setup-local.sh --full-setup
 
 # Or individual steps
-./setup-local.sh --check-gpu          # Test GPU + Docker
-./setup-local.sh --download-models    # Download AI models
-./setup-local.sh --start-services     # Start all services with GPU
+# ./setup-local.sh --check-gpu          # Test GPU + Docker
+# ./setup-local.sh --download-models    # Download AI models
+# ./setup-local.sh --start-services     # Start all services with GPU
 
 # AI Inference Services Setup Script
 # Configures and starts the AI inference services for local WSL2 development
@@ -132,7 +132,7 @@ download_models() {
     local attempt=1
     
     while [[ $attempt -le $max_attempts ]]; do
-        if docker exec ai-ollama curl -f http://localhost:11434/api/tags &> /dev/null; then
+        if curl -f http://localhost:7114/api/tags &> /dev/null; then
             log "SUCCESS" "Ollama is ready"
             break
         fi
@@ -197,11 +197,11 @@ show_access_info() {
     log "INFO" "AI Services Access Information:"
     echo ""
     log "INFO" "Local Development Access:"
-    log "INFO" "  Open WebUI:     http://localhost:8189"
-    log "INFO" "  ComfyUI:        http://localhost:8188"
-    log "INFO" "  Model Manager:  http://localhost:8191"
-    log "INFO" "  OpenRouter:     http://localhost:8190"
-    log "INFO" "  Ollama API:     http://localhost:11434"
+    log "INFO" "  Open WebUI:     http://localhost:7189"
+    log "INFO" "  ComfyUI:        http://localhost:7188"
+    log "INFO" "  Model Manager:  http://localhost:7191"
+    log "INFO" "  OpenRouter:     http://localhost:7190"
+    log "INFO" "  Ollama API:     http://localhost:7114"
     echo ""
     log "INFO" "Management Commands:"
     log "INFO" "  Start:          docker compose --profile gpu up -d"
