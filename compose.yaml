@@ -14,7 +14,7 @@ services:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_ORIGINS=*
     networks:
-      - homelab-web
+      - web
     deploy:
       resources:
         reservations:
@@ -49,7 +49,7 @@ services:
       - OPENAI_API_BASE_URL=${OPENROUTER_API_URL:-https://openrouter.ai/api/v1}
       - OPENAI_API_KEY=${OPENROUTER_API_KEY}
     networks:
-      - homelab-web
+      - web
     # No hard dependency; can run cloud-only via OpenRouter
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
@@ -75,7 +75,7 @@ services:
     environment:
       - CLI_ARGS=--listen 0.0.0.0 --port 8188
     networks:
-      - homelab-web
+      - web
     deploy:
       resources:
         reservations:
@@ -103,7 +103,7 @@ services:
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
       - RATE_LIMIT=${RATE_LIMIT:-100}
     networks:
-      - homelab-web
+      - web
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8190/health"]
       interval: 30s
@@ -130,7 +130,7 @@ services:
       - COMFYUI_URL=http://comfyui:8188
       - MODEL_STORAGE_PATH=/app/models
     networks:
-      - homelab-web
+      - web
     depends_on:
       - ollama
       - comfyui
@@ -150,6 +150,6 @@ volumes:
     driver: local
 
 networks:
-  homelab-web:
+  web:
     external: true
     name: homelab-web
