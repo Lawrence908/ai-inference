@@ -103,16 +103,16 @@ cd /home/chris/apps/ai-inference
 ## 🔗 **Access URLs**
 
 ### **Direct LAN Access**
-- **Open WebUI**: http://192.168.50.70:8189
-- **ComfyUI**: http://192.168.50.70:8188
-- **Model Manager**: http://192.168.50.70:8191
-- **OpenRouter**: http://192.168.50.70:8190
+- **Open WebUI**: http://192.168.50.81:8189
+- **ComfyUI**: http://192.168.50.81:8188
+- **Model Manager**: http://192.168.50.81:8191
+- **OpenRouter**: http://192.168.50.81:8190
 
 ### **Proxy Access (Organizr Embedding)**
-- **Open WebUI**: http://192.168.50.70:8161
-- **ComfyUI**: http://192.168.50.70:8162
-- **Model Manager**: http://192.168.50.70:8164
-- **OpenRouter**: http://192.168.50.70:8163
+- **Open WebUI**: http://192.168.50.81:8161
+- **ComfyUI**: http://192.168.50.81:8162
+- **Model Manager**: http://192.168.50.81:8164
+- **OpenRouter**: http://192.168.50.81:8163
 
 ### **Public Access (Cloudflare Tunnel)**
 - **Open WebUI**: https://chrislawrence.ca/ai
