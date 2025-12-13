@@ -25,3 +25,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
 EXPOSE 8192
 
 CMD ["python", "app.py"]
+
