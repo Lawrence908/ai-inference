@@ -11,6 +11,7 @@ Self-hosted AI inference services for the Hephaestus homelab, providing local LL
 | **ComfyUI** | 8188 | Advanced image generation workflows | 🟡 Pending |
 | **OpenRouter Proxy** | 8190 | Cloud model access via OpenRouter | 🟡 Pending |
 | **Model Manager** | 8191 | Model download and management | 🟡 Pending |
+| **Unified Inference Proxy** | 8192 | Unified local and cloud model access | 🟡 Pending |
 
 ## 🚀 **Quick Start**
 
@@ -33,10 +34,10 @@ docker compose -f docker-compose-homelab.yml --profile gpu up -d
 ```
 
 ### **3. Access Services**
-- **Open WebUI**: http://192.168.50.70:8161 (via proxy)
-- **ComfyUI**: http://192.168.50.70:8162 (via proxy)
-- **Model Manager**: http://192.168.50.70:8164 (via proxy)
-- **OpenRouter Proxy**: http://192.168.50.70:8163 (via proxy)
+- **Open WebUI**: http://192.168.50.128:8161 (via proxy)
+- **ComfyUI**: http://192.168.50.128:8162 (via proxy)
+- **Model Manager**: http://192.168.50.128:8164 (via proxy)
+- **OpenRouter Proxy**: http://192.168.50.128:8163 (via proxy)
 
 ## 🔧 **Configuration**
 
@@ -57,6 +58,9 @@ WEBUI_NAME=Hephaestus AI
 OPENROUTER_API_KEY=your-openrouter-api-key
 OPENROUTER_API_URL=https://openrouter.ai/api/v1
 
+# Unified Inference Proxy
+DEFAULT_BACKEND=auto  # Options: auto, local, cloud
+
 # GPU Configuration
 CUDA_VISIBLE_DEVICES=0
 NVIDIA_VISIBLE_DEVICES=all
@@ -71,8 +75,38 @@ docker exec ai-ollama ollama pull mistral
 # List available models
 docker exec ai-ollama ollama list
 
+# List all models (local + cloud) via unified proxy
+curl http://localhost:8192/models
+
 # Remove models
 docker exec ai-ollama ollama rm model-name
+```
+
+### **Using the Unified Inference Proxy**
+```bash
+# Chat with auto-detection (default)
+curl -X POST http://localhost:8192/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Force local model
+curl -X POST "http://localhost:8192/chat/completions?backend=local" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "llama3",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# Force cloud model
+curl -X POST "http://localhost:8192/chat/completions?backend=cloud" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-4",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
 ```
 
 ## 📊 **Service Details**
@@ -101,6 +135,21 @@ docker exec ai-ollama ollama rm model-name
 - **Features**: Rate limiting, cost tracking, unified API
 - **Authentication**: API key-based authentication
 
+### **Unified AI Inference Proxy**
+- **Purpose**: Unified interface for both local (Ollama) and cloud (OpenRouter) models
+- **Features**: 
+  - Auto-detection of model location (local vs cloud)
+  - Manual backend selection via API parameter (`?backend=local|cloud|auto`)
+  - Unified OpenRouter-compatible API interface
+  - Automatic fallback between backends
+  - Combined model listing from both backends
+- **Usage**: 
+  - Auto-detect: `POST /chat/completions?backend=auto` (default)
+  - Force local: `POST /chat/completions?backend=local`
+  - Force cloud: `POST /chat/completions?backend=cloud`
+- **Models**: All Ollama models (local) + all OpenRouter models (cloud)
+- **API**: OpenRouter-compatible format for seamless integration
+
 ### **Model Manager**
 - **Purpose**: Centralized model download and management
 - **Features**: Model registry, storage monitoring, download queue
@@ -115,13 +164,13 @@ docker exec ai-ollama ollama rm model-name
 - **DNS**: Services accessible by container name
 
 ### **Port Mappings**
-- **Direct Access**: 11434, 8188, 8189, 8190, 8191
+- **Direct Access**: 11434, 8188, 8189, 8190, 8191, 8192
 - **Proxy Ports**: 8161, 8162, 8163, 8164 (for Organizr embedding)
 - **Public URLs**: Via Cloudflare Tunnel
 
 ### **Caddy Integration**
-- **Subpath Routing**: `/ai/*`, `/comfyui/*`, `/openrouter/*`, `/models/*`
-- **Proxy Ports**: 8161-8164 for iframe embedding
+- **Subpath Routing**: `/ai/*`, `/comfyui/*`, `/openrouter/*`, `/inference/*`, `/models/*`
+- **Proxy Ports**: 8161-8165 for iframe embedding
 - **Headers**: X-Frame-Options removed for embedding
 
 ## 🔒 **Security**
@@ -145,6 +194,7 @@ docker exec ai-ollama ollama rm model-name
 - **Open WebUI**: `/health` endpoint
 - **ComfyUI**: `/system_stats` endpoint
 - **OpenRouter Proxy**: `/health` endpoint
+- **Unified Inference Proxy**: `/health` endpoint
 - **Model Manager**: `/health` endpoint
 
 ### **Metrics**

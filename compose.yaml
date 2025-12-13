@@ -14,7 +14,7 @@ services:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_ORIGINS=*
     networks:
-      - homelab-web
+      - web
     deploy:
       resources:
         reservations:
@@ -29,6 +29,31 @@ services:
       retries: 3
       start_period: 60s
 
+  # AI Inference Proxy - Unified proxy for local and cloud models
+  ai-inference-proxy:
+    build: ./ai-inference-proxy
+    container_name: ai-inference-proxy
+    restart: unless-stopped
+    ports:
+      - "8192:8192"
+    environment:
+      - PROXY_PORT=8192
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - OPENROUTER_API_URL=${OPENROUTER_API_URL:-https://openrouter.ai/api/v1}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
+      - RATE_LIMIT=${RATE_LIMIT:-100}
+    networks:
+      - web
+    # Note: ollama dependency is optional (has GPU profile)
+    # ai-inference-proxy will work without it, just won't have local models
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8192/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   # Open WebUI - Web interface for Ollama
   openwebui:
     image: ghcr.io/open-webui/open-webui:main
@@ -40,17 +65,22 @@ services:
       - openwebui_data:/app/backend/data
       - ./data/cache:/app/backend/cache
     environment:
+      # Local models via Ollama (shows in "All" filter, local models)
       - OLLAMA_BASE_URL=http://ollama:11434
+      # Unified proxy for both local and cloud models (shows in "External" filter)
+      # The unified proxy combines models from Ollama and OpenRouter
+      - OPENAI_API_BASE_URL=http://ai-inference-proxy:8192
+      - OPENAI_API_KEY=${OPENROUTER_API_KEY}
+      # WebUI configuration
       - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY}
       - WEBUI_AUTH=${WEBUI_AUTH:-True}
       - WEBUI_NAME=${WEBUI_NAME:-Hephaestus AI}
       - DEFAULT_USER_ROLE=${DEFAULT_USER_ROLE:-user}
       - ENABLE_SIGNUP=${ENABLE_SIGNUP:-False}
-      - OPENAI_API_BASE_URL=${OPENROUTER_API_URL:-https://openrouter.ai/api/v1}
-      - OPENAI_API_KEY=${OPENROUTER_API_KEY}
     networks:
-      - homelab-web
-    # No hard dependency; can run cloud-only via OpenRouter
+      - web
+    depends_on:
+      - ai-inference-proxy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
@@ -75,7 +105,7 @@ services:
     environment:
       - CLI_ARGS=--listen 0.0.0.0 --port 8188
     networks:
-      - homelab-web
+      - web
     deploy:
       resources:
         reservations:
@@ -103,7 +133,7 @@ services:
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
       - RATE_LIMIT=${RATE_LIMIT:-100}
     networks:
-      - homelab-web
+      - web
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8190/health"]
       interval: 30s
@@ -130,7 +160,7 @@ services:
       - COMFYUI_URL=http://comfyui:8188
       - MODEL_STORAGE_PATH=/app/models
     networks:
-      - homelab-web
+      - web
     depends_on:
       - ollama
       - comfyui
@@ -150,6 +180,6 @@ volumes:
     driver: local
 
 networks:
-  homelab-web:
+  web:
     external: true
     name: homelab-web
