@@ -33,10 +33,10 @@ docker compose -f docker-compose-homelab.yml --profile gpu up -d
 ```
 
 ### **3. Access Services**
-- **Open WebUI**: http://192.168.50.81:8161 (via proxy)
-- **ComfyUI**: http://192.168.50.81:8162 (via proxy)
-- **Model Manager**: http://192.168.50.81:8164 (via proxy)
-- **OpenRouter Proxy**: http://192.168.50.81:8163 (via proxy)
+- **Open WebUI**: http://192.168.50.128:8161 (via proxy)
+- **ComfyUI**: http://192.168.50.128:8162 (via proxy)
+- **Model Manager**: http://192.168.50.128:8164 (via proxy)
+- **OpenRouter Proxy**: http://192.168.50.128:8163 (via proxy)
 
 ## 🔧 **Configuration**
 
