@@ -456,29 +456,39 @@ async def metrics():
 @limiter.limit(RATE_LIMIT)
 async def list_models(
     request: Request,
+    backend: Optional[Literal["local", "cloud", "all"]] = Query("all", description="Filter models by backend"),
     api_key: Optional[str] = Depends(verify_api_key)
 ):
-    """List available models from both backends"""
+    """List available models from both backends
+    
+    When accessed via Open WebUI's OPENAI_API_BASE_URL, this returns cloud models.
+    Local models are accessed directly via OLLAMA_BASE_URL in Open WebUI.
+    """
     models = []
     
-    # Get local models from Ollama
-    try:
-        ollama_models = await get_ollama_models()
-        for model_name in ollama_models:
-            model_info = ollama_models[model_name]
-            models.append(ModelInfo(
-                id=model_name,
-                name=model_info.get("name", model_name),
-                description=f"Local model via Ollama",
-                context_length=None,
-                pricing=None,
-                backend="local"
-            ))
-    except Exception as e:
-        logger.error("Failed to fetch Ollama models", error=str(e))
+    # Only include local models if explicitly requested or "all"
+    if backend in ("all", "local"):
+        try:
+            ollama_models = await get_ollama_models()
+            for model_name in ollama_models:
+                model_info = ollama_models[model_name]
+                # Use base name to avoid duplicates (e.g., "llama3" and "llama3:latest")
+                base_name = model_name.split(":")[0]
+                # Only add if we haven't seen this base name yet
+                if not any(m.id == base_name or m.id == model_name for m in models):
+                    models.append(ModelInfo(
+                        id=base_name,  # Use base name for consistency
+                        name=model_info.get("name", base_name),
+                        description=f"Local model via Ollama",
+                        context_length=None,
+                        pricing=None,
+                        backend="local"
+                    ))
+        except Exception as e:
+            logger.error("Failed to fetch Ollama models", error=str(e))
     
     # Get cloud models from OpenRouter
-    if OPENROUTER_API_KEY:
+    if backend in ("all", "cloud") and OPENROUTER_API_KEY:
         try:
             client = await get_http_client()
             headers = {
@@ -503,7 +513,11 @@ async def list_models(
         except Exception as e:
             logger.error("Failed to fetch OpenRouter models", error=str(e))
     
-    logger.info("Models listed successfully", count=len(models), local=sum(1 for m in models if m.backend == "local"), cloud=sum(1 for m in models if m.backend == "cloud"))
+    logger.info("Models listed successfully", 
+               count=len(models), 
+               local=sum(1 for m in models if m.backend == "local"), 
+               cloud=sum(1 for m in models if m.backend == "cloud"),
+               filter=backend)
     return models
 
 @app.post("/chat/completions")
@@ -648,4 +662,5 @@ if __name__ == "__main__":
         log_level="info",
         access_log=True
     )
+
 
