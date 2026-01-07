@@ -102,3 +102,4 @@ After adding the tool server, you can:
 - Check OpenAPI endpoint: `curl http://context-pack:8000/openapi.json`
 - Verify CORS is enabled in context pack service
 - Check Open WebUI logs for tool server connection errors
+

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 # AI Inference Services Setup Script
-# Configures and starts the AI inference services for Hephaestus homelab
+# Configures and starts the AI inference services for Daedalus homelab
 
 ROOT_DIR="/home/chris"
 APPS_DIR="$ROOT_DIR/apps"
