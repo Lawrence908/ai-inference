@@ -27,3 +27,4 @@ EXPOSE 8192
 CMD ["python", "app.py"]
 
 
+

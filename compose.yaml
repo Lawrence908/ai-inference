@@ -13,6 +13,8 @@ services:
     environment:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_ORIGINS=*
+      # Force Ollama to use the CUDA GPU backend when available
+      - OLLAMA_GPU_BACKEND=cuda
     networks:
       - web
     deploy:
