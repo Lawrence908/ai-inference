@@ -1,6 +1,12 @@
 # Secrets
 .env
 
+# Model weights and generated data.
+# This tree is empty on daedalus, where the stack was removed, but the Apollo
+# checkout uses data/models/ as its live ComfyUI model store (FLUX is ~23 GB).
+# Keep it ignored so a git add -A there cannot try to commit the weights.
+data/
+
 # Python caches
 **/__pycache__/
 **/*.pyc
