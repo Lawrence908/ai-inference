@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+FROM nvidia/cuda:12.8.1-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -18,7 +18,7 @@ RUN python3 -m venv /opt/venv \
     && . /opt/venv/bin/activate \
     && pip install --upgrade pip \
     && pip install --no-cache-dir -r /opt/ComfyUI/requirements.txt \
-    && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu121
+    && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu128
 
 ENV PATH="/opt/venv/bin:${PATH}"
 
@@ -29,8 +29,8 @@ EXPOSE 8188
 
 WORKDIR /opt/ComfyUI
 
-ENTRYPOINT ["bash", "-lc"]
-CMD ["python3", "main.py", "--listen", "0.0.0.0", "--port", "8188"]
+ENTRYPOINT ["python3", "main.py"]
+CMD ["--listen", "0.0.0.0", "--port", "8188"]
 
 
 
