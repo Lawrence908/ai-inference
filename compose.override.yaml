@@ -15,9 +15,9 @@ services:
       - "nvidia.com/gpu=all"
     ports: !override
       - "7114:11434"
-    volumes:
+    volumes: !override
       - ollama_data:/root/.ollama
-      - ./data/models:/models
+      - /home/chris/ai-data/models:/models
     environment:
       - OLLAMA_HOST=0.0.0.0
       - OLLAMA_ORIGINS=*
@@ -87,35 +87,9 @@ services:
       retries: 3
       start_period: 30s
 
-  # ComfyUI - Advanced image generation workflows
-  # GPU support requires: nvidia-container-toolkit installed in WSL2
-  comfyui:
-    build: ./comfyui
-    container_name: ai-comfyui
-    restart: unless-stopped
-    profiles: ["gpu"]
-    deploy: !reset null
-    runtime: runc
-    devices:
-      - "nvidia.com/gpu=all"
-    ports:
-      - "7188:8188"
-    volumes:
-      - comfyui_data:/opt/ComfyUI/user
-      - ./data/models:/opt/ComfyUI/models
-      - ./data/outputs:/opt/ComfyUI/output
-      - ./comfyui/workflows:/opt/ComfyUI/user/default/workflows
-      - ./comfyui/custom_nodes:/opt/ComfyUI/custom_nodes
-    environment:
-      - CLI_ARGS=--listen 0.0.0.0 --port 8188
-    networks:
-      - web
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
-      interval: 60s
-      timeout: 15s
-      retries: 3
-      start_period: 120s
+  # ComfyUI - moved to standalone ~/github/comfyui repo (own compose.yaml, joins
+  # the same external homelab-web network so model-manager can still reach it by
+  # hostname). See that repo's README.md for why.
 
   # OpenRouter Proxy - Cloud model access
   openrouter-proxy:
@@ -146,10 +120,9 @@ services:
     profiles: ["gpu"]
     ports:
       - "7191:8191"
-    volumes:
-      - ./data/models:/app/models
+    volumes: !override
+      - /home/chris/ai-data/models:/app/models
       - ollama_data:/app/ollama_data
-      - comfyui_data:/app/comfyui_data
       - ./model-manager/config:/app/config
     environment:
       - MANAGER_PORT=8191
@@ -160,7 +133,6 @@ services:
       - web
     depends_on:
       - ollama
-      - comfyui
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8191/health"]
       interval: 30s
@@ -172,8 +144,6 @@ volumes:
   ollama_data:
     driver: local
   openwebui_data:
-    driver: local
-  comfyui_data:
     driver: local
 
 networks:

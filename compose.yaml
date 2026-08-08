@@ -88,38 +88,6 @@ services:
       retries: 3
       start_period: 30s
 
-  # ComfyUI - Advanced image generation workflows
-  comfyui:
-    build: ./comfyui
-    container_name: ai-comfyui
-    restart: unless-stopped
-    profiles: ["gpu"]
-    ports:
-      - "8188:8188"
-    volumes:
-      - comfyui_data:/opt/ComfyUI/user
-      - ./data/models:/opt/ComfyUI/models
-      - ./data/outputs:/opt/ComfyUI/output
-      - ./comfyui/workflows:/opt/ComfyUI/user/default/workflows
-      - ./comfyui/custom_nodes:/opt/ComfyUI/custom_nodes
-    environment:
-      - CLI_ARGS=--listen 0.0.0.0 --port 8188
-    networks:
-      - web
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8188/system_stats"]
-      interval: 60s
-      timeout: 15s
-      retries: 3
-      start_period: 120s
-
   # OpenRouter Proxy - Cloud model access
   openrouter-proxy:
     build: ./openrouter-proxy
@@ -152,7 +120,6 @@ services:
     volumes:
       - ./data/models:/app/models
       - ollama_data:/app/ollama_data
-      - comfyui_data:/app/comfyui_data
       - ./model-manager/config:/app/config
     environment:
       - MANAGER_PORT=8191
@@ -163,7 +130,6 @@ services:
       - web
     depends_on:
       - ollama
-      - comfyui
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8191/health"]
       interval: 30s
@@ -175,8 +141,6 @@ volumes:
   ollama_data:
     driver: local
   openwebui_data:
-    driver: local
-  comfyui_data:
     driver: local
 
 networks:
