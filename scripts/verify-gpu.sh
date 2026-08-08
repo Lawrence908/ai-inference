@@ -22,9 +22,17 @@ else
   echo "docker command not found. Install Docker to run this check."
 fi
 
-# Ollama container GPU check (if running)
-if command -v docker >/dev/null 2>&1 && docker ps | grep -q ai-ollama; then
-  echo -e "\nOllama Container GPU:"
-  echo "(This will run inside ai-ollama: nvidia-smi, if present)"
-  docker exec ai-ollama nvidia-smi 2>/dev/null || echo "nvidia-smi not in container (OK for Ollama; it still uses the GPU via the NVIDIA runtime)"
+# Per-container GPU check for the daedalus GPU workloads that share the RTX 3080.
+# These are the fallback nodes behind ollama-gateway (:11440) and comfyui-gateway (:8189);
+# the primaries live on Apollo (192.168.50.30) and are not checked from here.
+if command -v docker >/dev/null 2>&1; then
+  for c in zeus-ollama zeus-comfyui; do
+    if docker ps --format '{{.Names}}' | grep -qx "$c"; then
+      echo -e "\n$c container GPU:"
+      docker exec "$c" nvidia-smi 2>/dev/null \
+        || echo "nvidia-smi not in container (OK; it can still use the GPU via the NVIDIA runtime)"
+    else
+      echo -e "\n$c is not running, skipping."
+    fi
+  done
 fi

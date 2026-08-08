@@ -1,12 +1,6 @@
 # Secrets
 .env
 
-# Data volumes
-data/
-ollama_data/
-openwebui_data/
-comfyui_data/
-
 # Python caches
 **/__pycache__/
 **/*.pyc
