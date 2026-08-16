@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Person Trainer</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; padding: 2rem; max-width: 900px; margin-inline: auto; }
+  h1 { font-size: 1.4rem; }
+  .layout { display: grid; grid-template-columns: 220px 1fr; gap: 2rem; align-items: start; }
+  #people-list { list-style: none; padding: 0; margin: 0; }
+  #people-list li { padding: 0.5rem 0.75rem; border-radius: 6px; cursor: pointer; }
+  #people-list li:hover { background: rgba(127,127,127,0.15); }
+  #people-list li.active { background: rgba(80,140,255,0.25); font-weight: 600; }
+  .badge { font-size: 0.7rem; opacity: 0.7; margin-left: 0.4rem; }
+  form.new-person { margin-top: 1rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  input, button, textarea { font-size: 0.95rem; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid rgba(127,127,127,0.4); }
+  button { cursor: pointer; }
+  .panel { border: 1px solid rgba(127,127,127,0.3); border-radius: 10px; padding: 1.25rem; }
+  .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 0.5rem; margin: 1rem 0; }
+  .photo-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+  #dropzone { border: 2px dashed rgba(127,127,127,0.5); border-radius: 8px; padding: 1.5rem; text-align: center; opacity: 0.8; }
+  #dropzone.drag { opacity: 1; border-color: rgb(80,140,255); }
+  progress { width: 100%; height: 1rem; }
+  .row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
+  #generated-image { max-width: 100%; border-radius: 8px; margin-top: 1rem; }
+  .status-ready { color: #2a8f4f; }
+  .status-training { color: #c98a1c; }
+  .status-failed { color: #c93c3c; }
+  .hint { font-size: 0.85rem; opacity: 0.7; }
+</style>
+</head>
+<body>
+<h1>Person Trainer</h1>
+<div class="layout">
+  <div>
+    <ul id="people-list"></ul>
+    <form class="new-person" id="new-person-form">
+      <input type="text" id="new-name" placeholder="Person name" required>
+      <button type="submit">+ Add person</button>
+    </form>
+  </div>
+
+  <div class="panel" id="detail-panel">
+    <p class="hint">Select or create a person to get started.</p>
+  </div>
+</div>
+
+<script>
+const API = '';
+let people = [];
+let selectedId = null;
+let pollTimer = null;
+
+async function api(path, opts) {
+  const res = await fetch(API + path, opts);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || res.statusText);
+  }
+  return res.headers.get('content-type')?.includes('application/json') ? res.json() : res;
+}
+
+async function refreshPeople() {
+  people = await api('/people');
+  const list = document.getElementById('people-list');
+  list.innerHTML = '';
+  for (const p of people) {
+    const li = document.createElement('li');
+    li.textContent = p.name;
+    li.className = p.id === selectedId ? 'active' : '';
+    const badge = document.createElement('span');
+    badge.className = 'badge status-' + (p.lora_status === 'ready' ? 'ready' : p.lora_status === 'failed' ? 'failed' : p.lora_status === 'training' ? 'training' : '');
+    badge.textContent = p.lora_status;
+    li.appendChild(badge);
+    li.onclick = () => selectPerson(p.id);
+    list.appendChild(li);
+  }
+}
+
+function selectPerson(id) {
+  selectedId = id;
+  refreshPeople();
+  renderDetail();
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(renderDetail, 3000);
+}
+
+async function renderDetail() {
+  if (!selectedId) return;
+  let person;
+  try {
+    person = await api(`/people/${selectedId}`);
+  } catch (e) {
+    return;
+  }
+  const panel = document.getElementById('detail-panel');
+  const job = person.last_job;
+  const isTraining = person.lora_status === 'training';
+
+  panel.innerHTML = `
+    <div class="row">
+      <h2 style="margin:0">${person.name}</h2>
+      <button id="delete-person" style="margin-left:auto">Delete person</button>
+    </div>
+    <p class="hint">trigger word: <code>${person.trigger_word}</code> &middot; ${person.photos.length} photo(s)</p>
+
+    <div id="dropzone">Drop photos here or <input type="file" id="file-input" multiple accept="image/*"></div>
+    <div class="photo-grid" id="photo-grid"></div>
+
+    <div class="row">
+      <button id="train-btn" ${isTraining || person.photos.length < 3 ? 'disabled' : ''}>
+        ${isTraining ? 'Training...' : 'Train LoRA'}
+      </button>
+      ${isTraining ? '<button id="cancel-btn">Cancel</button>' : ''}
+      <span class="hint">${person.photos.length < 3 ? 'need at least 3 photos' : ''}</span>
+    </div>
+    ${job ? renderJob(job) : ''}
+
+    <hr>
+    <h3>Generate</h3>
+    <textarea id="gen-prompt" rows="2" style="width:100%" placeholder="e.g. walking on a beach at sunset, cinematic lighting" ${person.lora_status === 'ready' ? '' : 'disabled'}></textarea>
+    <div class="row" style="margin-top:0.5rem">
+      <button id="generate-btn" ${person.lora_status === 'ready' ? '' : 'disabled'}>Generate</button>
+      <span class="hint">${person.lora_status === 'ready' ? '' : 'train a LoRA first'}</span>
+    </div>
+    <div id="gen-result"></div>
+  `;
+
+  const grid = document.getElementById('photo-grid');
+  for (const photo of person.photos) {
+    const img = document.createElement('img');
+    img.src = `/people/${person.id}/photos/${photo.id}`;
+    img.title = 'click to delete';
+    img.onclick = async () => {
+      await api(`/people/${person.id}/photos/${photo.id}`, { method: 'DELETE' });
+      renderDetail();
+    };
+    grid.appendChild(img);
+  }
+
+  document.getElementById('delete-person').onclick = async () => {
+    if (!confirm(`Delete ${person.name} and all their photos?`)) return;
+    await api(`/people/${person.id}`, { method: 'DELETE' });
+    selectedId = null;
+    document.getElementById('detail-panel').innerHTML = '<p class="hint">Select or create a person to get started.</p>';
+    refreshPeople();
+  };
+
+  const dropzone = document.getElementById('dropzone');
+  dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+  dropzone.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dropzone.classList.remove('drag');
+    await uploadPhotos(person.id, e.dataTransfer.files);
+  });
+  document.getElementById('file-input').addEventListener('change', async (e) => {
+    await uploadPhotos(person.id, e.target.files);
+  });
+
+  const trainBtn = document.getElementById('train-btn');
+  if (trainBtn) trainBtn.onclick = async () => {
+    await api(`/people/${person.id}/train`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ steps: 1500, network_dim: 16, learning_rate: 0.0001 }),
+    });
+    renderDetail();
+  };
+  const cancelBtn = document.getElementById('cancel-btn');
+  if (cancelBtn) cancelBtn.onclick = async () => {
+    await api(`/people/${person.id}/train/cancel`, { method: 'POST' });
+    renderDetail();
+  };
+
+  const generateBtn = document.getElementById('generate-btn');
+  if (generateBtn) generateBtn.onclick = async () => {
+    const prompt = document.getElementById('gen-prompt').value.trim();
+    if (!prompt) return;
+    generateBtn.disabled = true;
+    generateBtn.textContent = 'Generating...';
+    const resultDiv = document.getElementById('gen-result');
+    resultDiv.innerHTML = '';
+    try {
+      const res = await fetch(`/people/${person.id}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+      const blob = await res.blob();
+      const img = document.createElement('img');
+      img.id = 'generated-image';
+      img.src = URL.createObjectURL(blob);
+      resultDiv.appendChild(img);
+    } catch (e) {
+      resultDiv.innerHTML = `<p class="status-failed">${e.message}</p>`;
+    } finally {
+      generateBtn.disabled = false;
+      generateBtn.textContent = 'Generate';
+    }
+  };
+}
+
+function renderJob(job) {
+  if (job.status === 'running' || job.status === 'pending') {
+    const pct = job.total_steps ? Math.round(100 * (job.current_step || 0) / job.total_steps) : 0;
+    const elapsed = job.started_at ? Math.round(Date.now() / 1000 - job.started_at) : 0;
+    return `<p class="hint">${job.message || job.status} &middot; step ${job.current_step || 0}/${job.total_steps || '?'} &middot; ${elapsed}s elapsed</p>
+            <progress value="${pct}" max="100"></progress>`;
+  }
+  if (job.status === 'failed') {
+    return `<p class="status-failed">Training failed: ${job.error || 'unknown error'}</p>`;
+  }
+  if (job.status === 'done') {
+    return `<p class="status-ready">LoRA ready: ${job.lora_filename}</p>`;
+  }
+  return '';
+}
+
+async function uploadPhotos(personId, fileList) {
+  const form = new FormData();
+  for (const file of fileList) form.append('files', file);
+  await api(`/people/${personId}/photos`, { method: 'POST', body: form });
+  renderDetail();
+}
+
+document.getElementById('new-person-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const nameInput = document.getElementById('new-name');
+  const person = await api('/people', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: nameInput.value }),
+  });
+  nameInput.value = '';
+  await refreshPeople();
+  selectPerson(person.id);
+});
+
+refreshPeople();
+</script>
+</body>
+</html>

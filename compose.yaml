@@ -137,6 +137,31 @@ services:
       retries: 3
       start_period: 30s
 
+  # Person Trainer - person photo library + FLUX LoRA training/generation
+  person-trainer:
+    build: ./person-trainer
+    container_name: ai-person-trainer
+    restart: unless-stopped
+    profiles: ["gpu"]
+    ports:
+      - "8193:8193"
+    volumes:
+      - ./data/people:/app/people
+      - ./data/models/loras:/app/loras
+    environment:
+      - SERVICE_PORT=8193
+      - COMFYUI_URL=http://comfyui:8188
+      - PEOPLE_DIR=/app/people
+      - LORAS_DIR=/app/loras
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8193/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
 volumes:
   ollama_data:
     driver: local
