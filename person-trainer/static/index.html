@@ -99,6 +99,12 @@ async function renderDetail() {
   const job = person.last_job;
   const isTraining = person.lora_status === 'training';
 
+  const prevPrompt = document.getElementById('gen-prompt');
+  const preservedPrompt = prevPrompt ? prevPrompt.value : '';
+  const hadFocus = prevPrompt === document.activeElement;
+  const selStart = hadFocus ? prevPrompt.selectionStart : null;
+  const selEnd = hadFocus ? prevPrompt.selectionEnd : null;
+
   panel.innerHTML = `
     <div class="row">
       <h2 style="margin:0">${person.name}</h2>
@@ -127,6 +133,21 @@ async function renderDetail() {
     </div>
     <div id="gen-result"></div>
   `;
+
+  const jobActive = job && (job.status === 'running' || job.status === 'pending');
+  if (!jobActive && pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  const promptField = document.getElementById('gen-prompt');
+  if (promptField) {
+    promptField.value = preservedPrompt;
+    if (hadFocus) {
+      promptField.focus();
+      promptField.setSelectionRange(selStart, selEnd);
+    }
+  }
 
   const grid = document.getElementById('photo-grid');
   for (const photo of person.photos) {
@@ -167,6 +188,7 @@ async function renderDetail() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ steps: 1500, network_dim: 16, learning_rate: 0.0001 }),
     });
+    if (!pollTimer) pollTimer = setInterval(renderDetail, 3000);
     renderDetail();
   };
   const cancelBtn = document.getElementById('cancel-btn');
@@ -223,7 +245,11 @@ function renderJob(job) {
 async function uploadPhotos(personId, fileList) {
   const form = new FormData();
   for (const file of fileList) form.append('files', file);
-  await api(`/people/${personId}/photos`, { method: 'POST', body: form });
+  const result = await api(`/people/${personId}/photos`, { method: 'POST', body: form });
+  if (result.skipped && result.skipped.length) {
+    const lines = result.skipped.map(s => `${s.filename}: ${s.reason}`).join('\n');
+    alert(`${result.skipped.length} file(s) could not be read and were skipped:\n\n${lines}`);
+  }
   renderDetail();
 }
 

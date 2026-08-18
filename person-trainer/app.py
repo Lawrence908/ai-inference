@@ -27,9 +27,13 @@ import uvicorn
 from fastapi import FastAPI, File, HTTPException, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
+import pillow_avif  # noqa: F401 - registers the AVIF decoder with PIL on import
 from PIL import Image
+from pillow_heif import register_heif_opener
 from prometheus_client import Counter, Histogram, CONTENT_TYPE_LATEST, generate_latest
 from pydantic import BaseModel
+
+register_heif_opener()  # adds HEIC/HEIF decode support (iPhone photos)
 
 structlog.configure(
     processors=[
@@ -287,12 +291,14 @@ async def upload_photos(person_id: str, files: List[UploadFile] = File(...)):
     photos_dir = os.path.join(person_dir(person_id), "photos")
     os.makedirs(photos_dir, exist_ok=True)
     added = []
+    skipped = []
     for upload in files:
         contents = await upload.read()
         try:
             image = Image.open(io.BytesIO(contents))
             image = image.convert("RGB")
-        except Exception:
+        except Exception as exc:
+            skipped.append({"filename": upload.filename, "reason": str(exc)})
             continue
         image.thumbnail((MAX_PHOTO_DIMENSION, MAX_PHOTO_DIMENSION))
         photo_id = str(uuid.uuid4())[:8]
@@ -302,8 +308,10 @@ async def upload_photos(person_id: str, files: List[UploadFile] = File(...)):
         person["photos"].append(entry)
         added.append(entry)
     save_person(person)
+    if skipped:
+        logger.warning("photos skipped", person_id=person_id, skipped=skipped)
     logger.info("photos uploaded", person_id=person_id, count=len(added))
-    return {"added": added, "total": len(person["photos"])}
+    return {"added": added, "skipped": skipped, "total": len(person["photos"])}
 
 
 @app.get("/people/{person_id}/photos/{photo_id}")
