@@ -19,7 +19,8 @@
   button { cursor: pointer; }
   .panel { border: 1px solid rgba(127,127,127,0.3); border-radius: 10px; padding: 1.25rem; }
   .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 0.5rem; margin: 1rem 0; }
-  .photo-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; }
+  .photo-item img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; display: block; cursor: pointer; }
+  .photo-item input.caption { width: 100%; box-sizing: border-box; font-size: 0.7rem; padding: 2px 4px; margin-top: 3px; }
   #dropzone { border: 2px dashed rgba(127,127,127,0.5); border-radius: 8px; padding: 1.5rem; text-align: center; opacity: 0.8; }
   #dropzone.drag { opacity: 1; border-color: rgb(80,140,255); }
   progress { width: 100%; height: 1rem; }
@@ -53,8 +54,35 @@ let people = [];
 let selectedId = null;
 let pollTimer = null;
 
+function getToken() { return localStorage.getItem('person_trainer_token') || ''; }
+function setToken(t) { if (t) localStorage.setItem('person_trainer_token', t); else localStorage.removeItem('person_trainer_token'); }
+
+function authHeaders(extra) {
+  const headers = Object.assign({}, extra);
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
+// Wraps fetch with the stored access token (if PERSON_TRAINER_TOKEN is unset
+// server-side this is a no-op). On a 401 it prompts once for the token,
+// remembers it in this browser, and retries.
+async function fetchWithAuth(url, opts) {
+  opts = opts || {};
+  const doFetch = () => fetch(url, Object.assign({}, opts, { headers: authHeaders(opts.headers) }));
+  let res = await doFetch();
+  if (res.status === 401) {
+    const entered = prompt('This person-trainer instance requires an access token. Enter it (it will be remembered on this browser):');
+    if (entered) {
+      setToken(entered);
+      res = await doFetch();
+    }
+  }
+  return res;
+}
+
 async function api(path, opts) {
-  const res = await fetch(API + path, opts);
+  const res = await fetchWithAuth(API + path, opts);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.detail || res.statusText);
@@ -105,6 +133,19 @@ async function renderDetail() {
   const selStart = hadFocus ? prevPrompt.selectionStart : null;
   const selEnd = hadFocus ? prevPrompt.selectionEnd : null;
 
+  // The photo grid (with per-photo caption inputs) also gets fully rebuilt
+  // below on every poll tick - preserve in-progress caption edits the same way.
+  const captionValues = {};
+  let focusedCaptionId = null, captionSelStart = null, captionSelEnd = null;
+  document.querySelectorAll('.photo-item .caption').forEach((inp) => {
+    captionValues[inp.dataset.photoId] = inp.value;
+    if (inp === document.activeElement) {
+      focusedCaptionId = inp.dataset.photoId;
+      captionSelStart = inp.selectionStart;
+      captionSelEnd = inp.selectionEnd;
+    }
+  });
+
   panel.innerHTML = `
     <div class="row">
       <h2 style="margin:0">${person.name}</h2>
@@ -151,6 +192,9 @@ async function renderDetail() {
 
   const grid = document.getElementById('photo-grid');
   for (const photo of person.photos) {
+    const item = document.createElement('div');
+    item.className = 'photo-item';
+
     const img = document.createElement('img');
     img.src = `/people/${person.id}/photos/${photo.id}`;
     img.title = 'click to delete';
@@ -158,7 +202,29 @@ async function renderDetail() {
       await api(`/people/${person.id}/photos/${photo.id}`, { method: 'DELETE' });
       renderDetail();
     };
-    grid.appendChild(img);
+    item.appendChild(img);
+
+    const captionInput = document.createElement('input');
+    captionInput.type = 'text';
+    captionInput.className = 'caption';
+    captionInput.placeholder = 'caption (optional)';
+    captionInput.dataset.photoId = photo.id;
+    captionInput.value = captionValues[photo.id] ?? (photo.caption || '');
+    captionInput.addEventListener('change', async () => {
+      await api(`/people/${person.id}/photos/${photo.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ caption: captionInput.value.trim() || null }),
+      });
+    });
+    item.appendChild(captionInput);
+
+    grid.appendChild(item);
+
+    if (photo.id === focusedCaptionId) {
+      captionInput.focus();
+      captionInput.setSelectionRange(captionSelStart, captionSelEnd);
+    }
   }
 
   document.getElementById('delete-person').onclick = async () => {
@@ -206,7 +272,7 @@ async function renderDetail() {
     const resultDiv = document.getElementById('gen-result');
     resultDiv.innerHTML = '';
     try {
-      const res = await fetch(`/people/${person.id}/generate`, {
+      const res = await fetchWithAuth(`/people/${person.id}/generate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ prompt }),
@@ -246,10 +312,16 @@ async function uploadPhotos(personId, fileList) {
   const form = new FormData();
   for (const file of fileList) form.append('files', file);
   const result = await api(`/people/${personId}/photos`, { method: 'POST', body: form });
+  const messages = [];
   if (result.skipped && result.skipped.length) {
     const lines = result.skipped.map(s => `${s.filename}: ${s.reason}`).join('\n');
-    alert(`${result.skipped.length} file(s) could not be read and were skipped:\n\n${lines}`);
+    messages.push(`${result.skipped.length} file(s) could not be read and were skipped:\n${lines}`);
   }
+  if (result.duplicates && result.duplicates.length) {
+    const lines = result.duplicates.map(d => `${d.filename} looks like a near-duplicate of an existing photo (distance ${d.distance})`).join('\n');
+    messages.push(`${result.duplicates.length} possible duplicate(s) - still added, but consider removing near-identical shots:\n${lines}`);
+  }
+  if (messages.length) alert(messages.join('\n\n'));
   renderDetail();
 }
 

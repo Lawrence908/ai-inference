@@ -8,6 +8,22 @@ This service owns the person/photo registry and training job lifecycle. It does 
 training itself — see `ai-inference/CLAUDE.md`'s "Person LoRA training" section if you need that
 context. Callers only ever talk to this HTTP API.
 
+## Auth
+
+Controlled by the `PERSON_TRAINER_TOKEN` env var (same name/value on both sides of the
+integration).
+
+- **Unset / empty (default)**: auth is off. Every route behaves exactly as documented below with
+  no header required — this is the current state.
+- **Set**: every route except `GET /health` requires `Authorization: Bearer <token>`. Missing,
+  malformed, or wrong token → `401` with `{"detail": "..."}` and a `WWW-Authenticate: Bearer`
+  header. `GET /health` is always open (uptime probes shouldn't need the secret). CORS preflight
+  (`OPTIONS`) is also exempt.
+- Tokens are compared in constant time server-side; the value is never logged.
+- Flip it on with zero downtime: deploy this code first, agree the secret value out of band (not
+  in a commit), set it in both `person-trainer`'s env and the caller's env, restart both — no code
+  change needed on the caller's side beyond already sending the header.
+
 ## People
 
 ### `POST /people`
@@ -55,14 +71,28 @@ Response `200`:
 {
   "added": [{ "id": "b55bb9af", "filename": "b55bb9af.jpg" }],
   "skipped": [{ "filename": "photo3.avif", "reason": "cannot identify image file" }],
+  "duplicates": [{ "filename": "img4.jpg", "similar_to": "b55bb9af", "distance": 3 }],
   "total": 12
 }
 ```
 Always check `skipped` — files that fail to decode are silently excluded from `added` but not
 from the request, so a 15-file upload can legitimately return fewer than 15 in `added`.
 
+`duplicates` is informational only — flagged files are still decoded and added (they appear in
+`added` too), not rejected. It's a perceptual-hash (dHash) near-duplicate check against every
+photo already on the person, including others in the same upload batch. `distance` is a Hamming
+distance out of 64 bits; lower means more similar (the threshold used server-side is 8). Useful
+for prompting "these look like the same shot" without blocking the upload.
+
 ### `GET /people/{person_id}/photos/{photo_id}`
 Returns the JPEG bytes directly (for `<img src>`).
+
+### `PATCH /people/{person_id}/photos/{photo_id}`
+Set or clear a per-photo caption, used during training (see below).
+
+Request: `{ "caption": "outdoors, wearing sunglasses" }` (or `{ "caption": null }` to clear).
+Response `200`: the updated photo object, e.g. `{ "id": "b55bb9af", "filename": "b55bb9af.jpg",
+"caption": "outdoors, wearing sunglasses", "phash": 123456789 }`.
 
 ### `DELETE /people/{person_id}/photos/{photo_id}`
 `{ "deleted": "<photo_id>" }`.
@@ -77,7 +107,10 @@ Request (all fields optional, shown defaults):
 { "steps": 1500, "network_dim": 16, "learning_rate": 0.0001 }
 ```
 Requires >= 3 photos already uploaded. `409` if a job is already running/queued for anyone.
-`400` if <3 photos.
+`400` if <3 photos. Each photo's caption (set via the `PATCH` route above) is combined with the
+trigger word for that image's training caption (`"{trigger_word}, {caption}"`); photos with no
+caption just use the trigger word alone. Captions are optional but improve how well a longer
+generation prompt holds likeness — see the Notes section.
 
 Response `200` (the created job):
 ```json
@@ -115,6 +148,13 @@ On `done`, the job includes `"lora_filename": "22ee66a4.safetensors"` and the pe
 `lora_status`/`lora_filename` (from `GET /people/{id}`) flip to `ready` at the same time — poll
 the person, not just the job, if that's more convenient. If no job has ever been created:
 `{ "status": "none" }`.
+
+**Versioning**: each successful job writes a new, distinctly-named `.safetensors` rather than
+overwriting the previous one, and `person.lora_filename` always tracks the file from the most
+recently completed job — so a retrain never silently destroys a working LoRA, and this is fully
+transparent to callers as long as you always read `lora_filename` fresh rather than caching a
+filename. One older version is kept on disk as a backup before being pruned; deleting a person
+(`DELETE /people/{person_id}`) removes every version, not just the current one.
 
 ### `POST /people/{person_id}/train/cancel`
 `400` if nothing running/pending. Otherwise marks `status: "cancel_requested"`; the host runner

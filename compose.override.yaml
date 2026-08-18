@@ -156,6 +156,7 @@ services:
       - COMFYUI_URL=http://comfyui:8188
       - PEOPLE_DIR=/app/people
       - LORAS_DIR=/app/loras
+      - PERSON_TRAINER_TOKEN=${PERSON_TRAINER_TOKEN:-}
     networks:
       - web
     healthcheck:

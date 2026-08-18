@@ -11,6 +11,7 @@ reading/writing JSON files under the shared PEOPLE_DIR mount - this service
 never invokes training directly.
 """
 import asyncio
+import hmac
 import io
 import json
 import os
@@ -24,7 +25,7 @@ from typing import List, Optional
 import httpx
 import structlog
 import uvicorn
-from fastapi import FastAPI, File, HTTPException, Response, UploadFile
+from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 import pillow_avif  # noqa: F401 - registers the AVIF decoder with PIL on import
@@ -62,8 +63,10 @@ WORKFLOW_PATH = os.getenv(
     "GENERATE_WORKFLOW_PATH", "/app/workflows/generate_with_lora_flux.json"
 )
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+PERSON_TRAINER_TOKEN = os.getenv("PERSON_TRAINER_TOKEN", "")
 MAX_PHOTO_DIMENSION = 1536
 JOB_STALE_SECONDS = 300
+DUPLICATE_HAMMING_THRESHOLD = 8
 
 REQUEST_COUNT = Counter(
     "person_trainer_requests_total", "Total requests", ["endpoint", "status"]
@@ -112,6 +115,22 @@ app.add_middleware(
 )
 
 
+@app.middleware("http")
+async def require_bearer_token(request: Request, call_next):
+    # Auth is opt-in: PERSON_TRAINER_TOKEN unset (default) means every route
+    # behaves exactly as before. Set it to require `Authorization: Bearer
+    # <token>` on everything except /health and CORS preflight.
+    if PERSON_TRAINER_TOKEN and request.method != "OPTIONS" and request.url.path != "/health":
+        scheme, _, token = request.headers.get("authorization", "").partition(" ")
+        if scheme.lower() != "bearer" or not hmac.compare_digest(token, PERSON_TRAINER_TOKEN):
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "missing or invalid Authorization: Bearer <PERSON_TRAINER_TOKEN>"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    return await call_next(request)
+
+
 class PersonCreate(BaseModel):
     name: str
     trigger_word: Optional[str] = None
@@ -129,6 +148,26 @@ class GenerateRequest(BaseModel):
     height: int = 1024
     lora_strength: float = 1.0
     seed: Optional[int] = None
+
+
+class PhotoUpdate(BaseModel):
+    caption: Optional[str] = None
+
+
+def compute_phash(image: Image.Image) -> int:
+    """8x8 difference hash (dHash) for near-duplicate photo detection."""
+    small = image.convert("L").resize((9, 8), Image.LANCZOS)
+    pixels = list(small.getdata())
+    bits = 0
+    for row in range(8):
+        offset = row * 9
+        for col in range(8):
+            bits = (bits << 1) | (1 if pixels[offset + col] > pixels[offset + col + 1] else 0)
+    return bits
+
+
+def hamming_distance(a: int, b: int) -> int:
+    return bin(a ^ b).count("1")
 
 
 def person_dir(person_id: str) -> str:
@@ -274,13 +313,15 @@ async def get_person(person_id: str):
 
 @app.delete("/people/{person_id}")
 async def delete_person(person_id: str):
-    person = sync_lora_status(load_person(person_id))
+    load_person(person_id)
     shutil.rmtree(person_dir(person_id), ignore_errors=True)
-    lora_filename = person.get("lora_filename")
-    if lora_filename:
-        lora_path = os.path.join(LORAS_DIR, lora_filename)
-        if os.path.exists(lora_path):
-            os.remove(lora_path)
+    # Training produces a new versioned file per job (see run_trainer.py) and
+    # keeps the previous one as a safety net, so clean up every version here,
+    # not just the current lora_filename.
+    if os.path.isdir(LORAS_DIR):
+        for name in os.listdir(LORAS_DIR):
+            if name == f"{person_id}.safetensors" or name.startswith(f"{person_id}-"):
+                os.remove(os.path.join(LORAS_DIR, name))
     logger.info("person deleted", person_id=person_id)
     return {"deleted": person_id}
 
@@ -292,6 +333,8 @@ async def upload_photos(person_id: str, files: List[UploadFile] = File(...)):
     os.makedirs(photos_dir, exist_ok=True)
     added = []
     skipped = []
+    duplicates = []
+    known_hashes = [(p["id"], p["phash"]) for p in person["photos"] if p.get("phash") is not None]
     for upload in files:
         contents = await upload.read()
         try:
@@ -301,17 +344,33 @@ async def upload_photos(person_id: str, files: List[UploadFile] = File(...)):
             skipped.append({"filename": upload.filename, "reason": str(exc)})
             continue
         image.thumbnail((MAX_PHOTO_DIMENSION, MAX_PHOTO_DIMENSION))
+        phash = compute_phash(image)
+        for other_id, other_hash in known_hashes:
+            distance = hamming_distance(phash, other_hash)
+            if distance <= DUPLICATE_HAMMING_THRESHOLD:
+                duplicates.append(
+                    {"filename": upload.filename, "similar_to": other_id, "distance": distance}
+                )
+                break
         photo_id = str(uuid.uuid4())[:8]
         filename = f"{photo_id}.jpg"
         image.save(os.path.join(photos_dir, filename), "JPEG", quality=92)
-        entry = {"id": photo_id, "filename": filename}
+        entry = {"id": photo_id, "filename": filename, "caption": None, "phash": phash}
         person["photos"].append(entry)
-        added.append(entry)
+        added.append({"id": photo_id, "filename": filename})
+        known_hashes.append((photo_id, phash))
     save_person(person)
     if skipped:
         logger.warning("photos skipped", person_id=person_id, skipped=skipped)
+    if duplicates:
+        logger.warning("possible duplicate photos", person_id=person_id, duplicates=duplicates)
     logger.info("photos uploaded", person_id=person_id, count=len(added))
-    return {"added": added, "skipped": skipped, "total": len(person["photos"])}
+    return {
+        "added": added,
+        "skipped": skipped,
+        "duplicates": duplicates,
+        "total": len(person["photos"]),
+    }
 
 
 @app.get("/people/{person_id}/photos/{photo_id}")
@@ -336,6 +395,17 @@ async def delete_photo(person_id: str, photo_id: str):
     person["photos"] = [p for p in person["photos"] if p["id"] != photo_id]
     save_person(person)
     return {"deleted": photo_id}
+
+
+@app.patch("/people/{person_id}/photos/{photo_id}")
+async def update_photo(person_id: str, photo_id: str, body: PhotoUpdate):
+    person = load_person(person_id)
+    match = next((p for p in person["photos"] if p["id"] == photo_id), None)
+    if not match:
+        raise HTTPException(status_code=404, detail="photo not found")
+    match["caption"] = body.caption
+    save_person(person)
+    return match
 
 
 @app.post("/people/{person_id}/train")
