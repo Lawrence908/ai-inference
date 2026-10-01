@@ -125,6 +125,8 @@ http_client: Optional[httpx.AsyncClient] = None
 ollama_models_cache: Dict[str, Any] = {}
 ollama_cache_timestamp: Optional[datetime] = None
 OLLAMA_CACHE_TTL = 60  # Cache Ollama models for 60 seconds
+# Upper bound on the backend probe in /health -- see health_check()
+HEALTH_PROBE_TIMEOUT = float(os.getenv("HEALTH_PROBE_TIMEOUT", "2.0"))
 
 async def get_http_client():
     """Get or create HTTP client"""
@@ -426,12 +428,19 @@ async def health_check():
     """Health check endpoint"""
     uptime = (datetime.now() - start_time).total_seconds()
     
-    # Check backend availability
+    # Check backend availability.
+    # NOTE: this probe must stay well inside the container healthcheck timeout
+    # (compose: 15s). get_ollama_models() uses a 10s request timeout, which used
+    # to race the healthcheck's own 10s timeout and flap the container unhealthy
+    # whenever Ollama was slow. Ollama is an optional backend here, so bound the
+    # probe hard and report it degraded rather than letting /health hang.
     backends = {}
     try:
-        await get_ollama_models()
+        await asyncio.wait_for(get_ollama_models(), timeout=HEALTH_PROBE_TIMEOUT)
         backends["ollama"] = "available"
-    except:
+    except asyncio.TimeoutError:
+        backends["ollama"] = "timeout"
+    except Exception:
         backends["ollama"] = "unavailable"
     
     if OPENROUTER_API_KEY:

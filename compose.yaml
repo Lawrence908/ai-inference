@@ -48,9 +48,13 @@ services:
     # Note: ollama dependency is optional (has GPU profile)
     # ai-inference-proxy will work without it, just won't have local models
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8192/health"]
+      # /health bounds its Ollama probe at HEALTH_PROBE_TIMEOUT (2s), so this
+      # timeout only has to cover process-level stalls (WSL swap pressure).
+      # Keep it comfortably above the in-app probe bound -- when the two were
+      # both 10s the container flapped unhealthy on any slow Ollama response.
+      test: ["CMD", "curl", "-f", "--max-time", "12", "http://localhost:8192/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 15s
       retries: 3
       start_period: 30s
 

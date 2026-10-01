@@ -47,9 +47,11 @@ services:
     networks:
       - web
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8192/health"]
+      # Must mirror compose.yaml -- this block REPLACES the base one, so leaving
+      # the old 10s timeout here would undo the flap fix. See compose.yaml.
+      test: ["CMD", "curl", "-f", "--max-time", "12", "http://localhost:8192/health"]
       interval: 30s
-      timeout: 10s
+      timeout: 15s
       retries: 3
       start_period: 30s
 
